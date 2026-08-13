@@ -5,6 +5,10 @@
   "description": "DeepSeek Harness plugin with per-task model and reasoning-effort selection",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TTTPOB/dsh-task-models.git"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

@@ -1,6 +1,6 @@
 # dsh-task-models
 
-给 DeepSeek Harness 用的插件，让你在运行时给子代理任务指定模型和 reasoning effort。它对应 OpenCode 版 [`opencode-task-models`](../opencode-task-plugin/README.md) 的 DSH 移植：一个 `task` 工具在启动子代理时按任务选模型与推理档位，一个 `task_models` 工具用来发现已注册的 provider、模型和档位，避免把整个模型目录塞进每个 prompt。
+给 DeepSeek Harness 用的插件，让你在运行时给子代理任务指定模型和 reasoning effort。它对应 OpenCode 版 [`opencode-task-models`](https://github.com/TTTPOB/opencode-task-plugin) 的 DSH 移植：一个 `task` 工具在启动子代理时按任务选模型与推理档位，一个 `task_models` 工具用来发现已注册的 provider、模型和档位，避免把整个模型目录塞进每个 prompt。
 
 ## 和 OpenCode 版的差别
 
@@ -27,7 +27,7 @@ dsh plugin add ./dsh-task-models
 ### git 仓库
 
 ```bash
-dsh plugin add github:you/dsh-task-models
+dsh plugin --profile web add github:TTTPOB/dsh-task-models#main
 ```
 
 git 安装只拉源码不跑构建，插件靠 `prepare` 脚本在安装后编译。pnpm ≥10 需要先在 profile 的 `pnpm-workspace.yaml` 里放行构建：
