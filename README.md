@@ -20,7 +20,7 @@
 Release tarball 已包含 `dist/`，安装时不执行构建脚本，也不需要配置 `allowBuilds`：
 
 ```bash
-dsh plugin --profile web add dsh-task-models@https://github.com/TTTPOB/dsh-task-models/releases/download/v0.1.0/dsh-task-models-0.1.0.tgz
+dsh plugin --profile web add dsh-task-models@https://github.com/TTTPOB/dsh-task-models/releases/download/v0.1.1/dsh-task-models-0.1.1.tgz
 ```
 
 ### 本地目录
@@ -35,7 +35,7 @@ dsh plugin --profile web add ./dsh-task-models
 ### Git 源码
 
 ```bash
-dsh plugin --profile web add github:TTTPOB/dsh-task-models#v0.1.0
+dsh plugin --profile web add github:TTTPOB/dsh-task-models#v0.1.1
 ```
 
 Git 安装需要运行仓库的 `prepare` 构建源码。pnpm 10 默认拦截依赖构建脚本；优先使用上面的 Release tarball。
@@ -44,7 +44,7 @@ Git 安装需要运行仓库的 `prepare` 构建源码。pnpm 10 默认拦截依
 
 ```bash
 pnpm pack
-dsh plugin --profile web add ./dsh-task-models-0.1.0.tgz
+dsh plugin --profile web add ./dsh-task-models-0.1.1.tgz
 ```
 
 装完重启 dsh。

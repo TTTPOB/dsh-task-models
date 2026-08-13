@@ -1,10 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
+import * as plugin from '../src/index.js'
 import { applyTaskModelReasoningEffort, createTools, parseModel } from '../src/index.js'
 import type { LlmCallConfig, LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
 
 const config = { provider: 'spawn', toolName: 'task', maxDepth: 3 } as const
+
+describe('plugin export shape', () => {
+  it('keeps inject metadata on the namespace loaded by Cordis', () => {
+    expect('default' in plugin).toBe(false)
+    expect(plugin.name).toBe('task-models')
+    expect(plugin.inject).toEqual(['tools', 'subagents', 'llm'])
+    expect(typeof plugin.apply).toBe('function')
+  })
+})
 
 function model(provider: string, id: string, name = id): LlmModelInfo {
   return { provider, id, name }
