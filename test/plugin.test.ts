@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createTools, parseModel } from '../src/index.js'
-import type { LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import { applyTaskModelReasoningEffort, createTools, parseModel } from '../src/index.js'
+import type { LlmCallConfig, LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
 
@@ -49,8 +49,18 @@ function run(output: string, stopReason: 'completed' | 'aborted' = 'completed'):
   } as unknown as SubagentRun
 }
 
-function execWith(provider?: string, model?: string) {
-  return { agent: { options: { provider, model } }, signal: new AbortController().signal }
+function execWith(
+  provider?: string,
+  model?: string,
+  header?: { config: LlmCallConfig; adapterDefaults?: { reasoningEffort?: true } },
+) {
+  return {
+    agent: {
+      options: { provider, model },
+      session: { requestHeader: () => header },
+    },
+    signal: new AbortController().signal,
+  }
 }
 
 describe('parseModel', () => {
@@ -80,8 +90,83 @@ describe('task', () => {
     expect(resolveCallConfig).toHaveBeenCalledWith({ provider: 'openrouter', model: 'vendor/model' })
     expect(start).toHaveBeenCalledTimes(1)
     const request = start.mock.calls[0]?.[1]
-    expect(request?.agentOptions).toEqual({ provider: 'openrouter', model: 'vendor/model' })
+    expect(request?.agentOptions).toEqual({
+      provider: 'openrouter',
+      model: 'vendor/model',
+      taskModelReasoningEffort: null,
+    })
     expect(result).toEqual({ runId: 'child-1', output: 'done' })
+  })
+
+  it('validates and carries an explicit reasoning effort to the child AgentOptions', async () => {
+    const { deps, start, resolveCallConfig } = setup()
+    start.mockResolvedValue(run('high effort'))
+    const { task } = createTools(deps as never, config)
+
+    await (task as never as { execute: (a: unknown, e: unknown) => Promise<unknown> })
+      .execute(
+        { description: 'd', prompt: 'p', model: 'deepseek/v4-pro', reasoning_effort: 'high' },
+        execWith('deepseek', 'v4-flash'),
+      )
+
+    expect(resolveCallConfig).toHaveBeenCalledWith({
+      provider: 'deepseek',
+      model: 'v4-pro',
+      reasoningEffort: 'high',
+    })
+    expect(start.mock.calls[0]?.[1].agentOptions).toEqual({
+      provider: 'deepseek',
+      model: 'v4-pro',
+      taskModelReasoningEffort: 'high',
+    })
+  })
+
+  it('uses the adapter default when reasoning_effort is default', async () => {
+    const { deps, start, resolveCallConfig } = setup()
+    start.mockResolvedValue(run('default effort'))
+    const { task } = createTools(deps as never, config)
+
+    await (task as never as { execute: (a: unknown, e: unknown) => Promise<unknown> })
+      .execute(
+        { description: 'd', prompt: 'p', model: 'deepseek/v4-pro', reasoning_effort: 'default' },
+        execWith('deepseek', 'v4-flash'),
+      )
+
+    expect(resolveCallConfig).toHaveBeenCalledWith({ provider: 'deepseek', model: 'v4-pro' })
+    expect(start.mock.calls[0]?.[1].agentOptions).toEqual({
+      provider: 'deepseek',
+      model: 'v4-pro',
+      taskModelReasoningEffort: null,
+    })
+  })
+
+  it('rejects an empty reasoning effort before delegating', async () => {
+    const { deps, start } = setup()
+    const { task } = createTools(deps as never, config)
+
+    await expect(
+      (task as never as { execute: (a: unknown, e: unknown) => Promise<unknown> })
+        .execute(
+          { description: 'd', prompt: 'p', model: 'deepseek/v4-pro', reasoning_effort: '   ' },
+          execWith('deepseek', 'v4-flash'),
+        ),
+    ).rejects.toThrow(/reasoning_effort must be non-empty/)
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unsupported reasoning effort before delegating', async () => {
+    const { deps, start, resolveCallConfig } = setup()
+    resolveCallConfig.mockRejectedValue(new Error('does not support reasoning effort "impossible"'))
+    const { task } = createTools(deps as never, config)
+
+    await expect(
+      (task as never as { execute: (a: unknown, e: unknown) => Promise<unknown> })
+        .execute(
+          { description: 'd', prompt: 'p', model: 'deepseek/v4-pro', reasoning_effort: 'impossible' },
+          execWith('deepseek', 'v4-flash'),
+        ),
+    ).rejects.toThrow(/does not support reasoning effort/)
+    expect(start).not.toHaveBeenCalled()
   })
 
   it('inherits the calling agent model when no model is given', async () => {
@@ -93,7 +178,66 @@ describe('task', () => {
       .execute({ description: 'd', prompt: 'p' }, execWith('deepseek', 'v4-flash'))
 
     expect(start).toHaveBeenCalledTimes(1)
-    expect(start.mock.calls[0]?.[1].agentOptions).toEqual({ provider: 'deepseek', model: 'v4-flash' })
+    expect(start.mock.calls[0]?.[1].agentOptions).toEqual({
+      provider: 'deepseek',
+      model: 'v4-flash',
+      taskModelReasoningEffort: null,
+    })
+  })
+
+  it('inherits the active parent route and explicit effort from its request header', async () => {
+    const { deps, start, resolveCallConfig } = setup()
+    start.mockResolvedValue(run('active route'))
+    const { task } = createTools(deps as never, config)
+
+    await (task as never as { execute: (a: unknown, e: unknown) => Promise<unknown> })
+      .execute(
+        { description: 'd', prompt: 'p' },
+        execWith('deepseek', 'old-model', {
+          config: {
+            provider: 'openrouter',
+            model: 'active/model',
+            reasoningEffort: ReasoningEffortId('high'),
+          },
+        }),
+      )
+
+    expect(resolveCallConfig).toHaveBeenCalledWith({
+      provider: 'openrouter',
+      model: 'active/model',
+      reasoningEffort: 'high',
+    })
+    expect(start.mock.calls[0]?.[1].agentOptions).toEqual({
+      provider: 'openrouter',
+      model: 'active/model',
+      taskModelReasoningEffort: 'high',
+    })
+  })
+
+  it('does not turn an adapter default from the parent header into an explicit child effort', async () => {
+    const { deps, start, resolveCallConfig } = setup()
+    start.mockResolvedValue(run('adapter default'))
+    const { task } = createTools(deps as never, config)
+
+    await (task as never as { execute: (a: unknown, e: unknown) => Promise<unknown> })
+      .execute(
+        { description: 'd', prompt: 'p' },
+        execWith('deepseek', 'v4-pro', {
+          config: {
+            provider: 'deepseek',
+            model: 'v4-pro',
+            reasoningEffort: ReasoningEffortId('high'),
+          },
+          adapterDefaults: { reasoningEffort: true },
+        }),
+      )
+
+    expect(resolveCallConfig).toHaveBeenCalledWith({ provider: 'deepseek', model: 'v4-pro' })
+    expect(start.mock.calls[0]?.[1].agentOptions).toEqual({
+      provider: 'deepseek',
+      model: 'v4-pro',
+      taskModelReasoningEffort: null,
+    })
   })
 
   it('rejects an unknown provider before delegating', async () => {
@@ -117,6 +261,45 @@ describe('task', () => {
       (task as never as { execute: (a: unknown, e: unknown) => Promise<unknown> })
         .execute({ description: 'd', prompt: 'p' }, execWith('deepseek', 'v4-pro')),
     ).rejects.toThrow(/subagent run was cancelled[\s\S]*partial/)
+  })
+})
+
+describe('reasoning effort request hook', () => {
+  it('overrides an inherited request effort from the child AgentOptions', async () => {
+    const next = vi.fn(async () => ({
+      provider: 'deepseek',
+      model: 'v4-pro',
+      reasoningEffort: ReasoningEffortId('low'),
+    }))
+
+    const result = await applyTaskModelReasoningEffort(
+      { options: { taskModelReasoningEffort: ReasoningEffortId('high') } } as never,
+      next,
+    )
+
+    expect(result).toEqual({ provider: 'deepseek', model: 'v4-pro', reasoningEffort: 'high' })
+    expect(next).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears a fork-inherited effort when the task requested the default', async () => {
+    const result = await applyTaskModelReasoningEffort(
+      { options: { taskModelReasoningEffort: null } } as never,
+      () => Promise.resolve({
+        provider: 'deepseek',
+        model: 'v4-pro',
+        reasoningEffort: ReasoningEffortId('high'),
+      }),
+    )
+    expect(result).toEqual({ provider: 'deepseek', model: 'v4-pro' })
+  })
+
+  it('preserves the request when the plugin did not select an effort', async () => {
+    const config = { provider: 'deepseek', model: 'v4-pro' }
+    const result = await applyTaskModelReasoningEffort(
+      { options: {} } as never,
+      () => Promise.resolve(config),
+    )
+    expect(result).toBe(config)
   })
 })
 

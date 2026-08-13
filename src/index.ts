@@ -2,15 +2,16 @@
  * DeepSeek Harness plugin: per-task model selection for subagent delegation.
  *
  * Mirrors the `opencode-task-models` plugin for OpenCode: a `task` tool that
- * launches a foreground subagent with an optional `provider/model-id` selection
- * (defaulting to the calling agent's current model), plus a `task_models` tool
- * that lists registered providers, models, and reasoning efforts without
+ * launches a foreground subagent with optional `provider/model-id` and
+ * reasoning-effort selection (defaulting to the caller's active selection),
+ * plus a `task_models` tool that lists providers, models, and efforts without
  * placing the full catalog in every prompt.
  *
  * @module dsh-task-models
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {
   ContentBlock,
@@ -18,7 +19,9 @@ import type {
   LlmModelInfo,
   LlmProviderInfo,
   LlmResolvedModelInfo,
+  ReasoningEffortId as ReasoningEffortIdType,
 } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   SubagentResult,
   SubagentRun,
@@ -28,6 +31,17 @@ import { assertSubagentMaxDepth } from '@deepseek-ai/dsh-subagent'
 
 export const name = 'task-models'
 export const inject = ['tools', 'subagents', 'llm']
+
+/**
+ * Private plugin extension carried through the merge-extensible AgentOptions.
+ * The agent loop preserves it; this plugin's global request hook consumes it.
+ */
+declare module '@deepseek-ai/dsh-agent' {
+  interface AgentOptions {
+    /** Explicit task effort; null means clear inherited effort and use the model default. */
+    taskModelReasoningEffort?: ReasoningEffortIdType | null
+  }
+}
 
 /** Config: which subagent provider to delegate to, plus tool naming and depth. */
 export interface Config {
@@ -67,6 +81,22 @@ export interface ToolsDeps {
 interface ModelRoute {
   provider: string
   model: string
+}
+
+type TaskModelAgent = Pick<Agent, 'options'>
+
+/** Apply the private AgentOptions extension to one model request. */
+export async function applyTaskModelReasoningEffort(
+  agent: TaskModelAgent,
+  next: () => Promise<LlmCallConfig>,
+): Promise<LlmCallConfig> {
+  const config = await next()
+  const selected = agent.options.taskModelReasoningEffort
+  if (selected === undefined) return config
+  const { reasoningEffort: _inheritedEffort, ...withoutInheritedEffort } = config
+  return selected === null
+    ? withoutInheritedEffort
+    : { ...withoutInheritedEffort, reasoningEffort: selected }
 }
 
 /** Split `provider/model-id` on the first slash so model ids may contain `/`. */
@@ -131,9 +161,9 @@ export function createTools(deps: ToolsDeps, config: ResolvedConfig) {
   const task = defineTool({
     name: config.toolName,
     description:
-      'Launch a subagent task with optional per-task model selection. You may select any registered '
-      + 'provider model as `provider/model-id` (split on the first `/`). Call task_models first when '
-      + 'you need to discover available models.',
+      'Launch a foreground subagent task with optional per-task model and reasoning-effort selection. '
+      + 'Select a registered model as `provider/model-id` (split on the first `/`) and an adapter-owned '
+      + 'reasoning effort. Call task_models first when you need to discover available values.',
     parameters: {
       description: {
         type: 'string',
@@ -150,6 +180,12 @@ export function createTools(deps: ToolsDeps, config: ResolvedConfig) {
       model: {
         type: 'string',
         description: 'Optional model as `provider/model-id`. Omit to inherit the calling agent\'s current model.',
+      },
+      reasoning_effort: {
+        type: 'string',
+        description:
+          'Optional reasoning effort id for the selected model, or `default` to force the adapter/model default. '
+          + 'When both model and effort are omitted, inherit the caller\'s explicit effort. Call task_models to discover ids.',
       },
     },
     output: {
@@ -171,23 +207,51 @@ export function createTools(deps: ToolsDeps, config: ResolvedConfig) {
       if (args.description.trim().length === 0) throw new Error('description must be non-empty')
       if (args.prompt.trim().length === 0) throw new Error('prompt must be non-empty')
 
+      const parentHeader = parent.session.requestHeader()
+      const activeParentConfig = parentHeader?.config
       const route: ModelRoute = args.model !== undefined
         ? parseModel(args.model)
-        : parent.options.provider !== undefined && parent.options.model !== undefined
-          ? { provider: parent.options.provider, model: parent.options.model }
-          : (() => {
-            throw new Error('no model selected and the calling agent has no model to inherit')
-          })()
+        : activeParentConfig !== undefined
+          ? { provider: activeParentConfig.provider, model: activeParentConfig.model }
+          : parent.options.provider !== undefined && parent.options.model !== undefined
+            ? { provider: parent.options.provider, model: parent.options.model }
+            : (() => {
+              throw new Error('no model selected and the calling agent has no model to inherit')
+            })()
 
-      // Resolve the route before delegation so an unknown provider or model
-      // fails as a clear tool error instead of a child startup failure.
-      await deps.llm.resolveCallConfig(route)
+      const requestedEffort = args.reasoning_effort?.trim()
+      if (args.reasoning_effort !== undefined && requestedEffort?.length === 0) {
+        throw new Error('reasoning_effort must be non-empty')
+      }
+      const inheritedEffort = args.model === undefined
+        && activeParentConfig?.provider === route.provider
+        && activeParentConfig.model === route.model
+        && parentHeader?.adapterDefaults?.reasoningEffort !== true
+        ? activeParentConfig.reasoningEffort
+        : undefined
+      const reasoningEffort: ReasoningEffortIdType | null = args.reasoning_effort === undefined
+        ? (inheritedEffort ?? null)
+        : requestedEffort === 'default'
+          ? null
+          : ReasoningEffortId(requestedEffort as string)
+
+      // Resolve the complete explicit selection before delegation so an unknown
+      // provider, model, or effort fails as a clear tool error instead of a child
+      // startup failure. `default` deliberately validates without an effort;
+      // the request hook clears any effort inherited through a fork seed.
+      await deps.llm.resolveCallConfig({
+        ...route,
+        ...reasoningEffort === null ? {} : { reasoningEffort },
+      })
 
       const run = await deps.subagents.start(config.provider, {
         label: args.description,
         prompt: [{ type: 'text', text: args.prompt }],
         parent,
-        agentOptions: route,
+        agentOptions: {
+          ...route,
+          taskModelReasoningEffort: reasoningEffort,
+        },
         ...(config.maxDepth !== 'provider-managed' ? { maxDepth: config.maxDepth } : {}),
         signal: exec.signal,
       })
@@ -276,6 +340,12 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   const deps: ToolsDeps = { llm: ctx.llm, subagents: ctx.subagents }
   const { task, taskModels } = createTools(deps, resolved)
+
+  // AgentOptions is intentionally merge-extensible. In-process subagent
+  // providers preserve this plugin's private effort field; this unscoped
+  // listener sees every Agent request and applies it before exact-model
+  // validation and request-header persistence.
+  ctx.on('agent/request', ({ agent }, next) => applyTaskModelReasoningEffort(agent, next))
 
   // task_models only needs ctx.llm, which is always present once injected.
   ctx.tools.register(taskModels)
