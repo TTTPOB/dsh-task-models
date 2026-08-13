@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "dsh-task-models",
-  "version": "0.1.1",
-  "description": "DeepSeek Harness plugin with per-task model and reasoning-effort selection",
+  "version": "0.2.0",
+  "description": "Enhanced DSH subagent tools with per-call model and reasoning-effort selection",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -12,7 +12,14 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./delegation": {
+      "types": "./dist/delegation.d.ts",
+      "default": "./dist/delegation.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -32,20 +39,30 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.1",
     "typescript": "^5.8.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-agent": "*",
+    "@deepseek-ai/dsh-agent-presets": "*",
+    "@deepseek-ai/dsh-jobs": "*",
     "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-session": "*",
     "@deepseek-ai/dsh-subagent": "*",
+    "@deepseek-ai/dsh-system-prompt": "*",
     "@deepseek-ai/dsh-tools": "*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-jobs": "0.1.0-rc.6",
     "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-scope": "0.1.0-rc.6",
     "@deepseek-ai/dsh-subagent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
     "@types/node": "^24.0.0",
     "vitest": "^3.2.0"

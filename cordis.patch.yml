@@ -1,12 +1,26 @@
-# dsh-task-models bundle layer.
-#
-# Registers the task/task_models tools over the `spawn` subagent provider,
-# matching the built-in `subagent` tool's transport. Override `provider` in a
-# later layer (profile cordis.patch.yml) to delegate through `fork` or another
-# registered subagent provider.
+# Replace DSH's native model-facing subagent tools while leaving the subagent
+# registry, spawn/fork providers, continuation controls, jobs, and reporting
+# services in place.
+- id: tool-subagent
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
 - insert:
-    - id: task-models
+    - id: task-model-routing
       name: dsh-task-models
+
+    - id: enhanced-tool-subagent
+      name: dsh-task-models/delegation
       config:
         provider: spawn
-        toolName: task
+        toolName: subagent
+        backgroundMode: continuable
+
+    - id: enhanced-tool-subagent-fork
+      name: dsh-task-models/delegation
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: one-shot

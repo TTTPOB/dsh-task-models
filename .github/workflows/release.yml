@@ -35,6 +35,7 @@ jobs:
           mkdir release
           pnpm pack --pack-destination release
           tar -tzf release/*.tgz | grep -Fx package/dist/index.js
+          tar -tzf release/*.tgz | grep -Fx package/dist/delegation.js
           tar -tzf release/*.tgz | grep -Fx package/cordis.patch.yml
 
       - name: Publish GitHub release
