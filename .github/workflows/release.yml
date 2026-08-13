@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm build
+
+      - name: Verify release version
+        run: |
+          node -e 'const version = require("./package.json").version; if (process.env.GITHUB_REF_NAME !== `v${version}`) { throw new Error(`Tag ${process.env.GITHUB_REF_NAME} does not match package version ${version}`) }'
+
+      - name: Pack release asset
+        run: |
+          mkdir release
+          pnpm pack --pack-destination release
+          tar -tzf release/*.tgz | grep -Fx package/dist/index.js
+          tar -tzf release/*.tgz | grep -Fx package/cordis.patch.yml
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/*.tgz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/*.tgz --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+          fi
